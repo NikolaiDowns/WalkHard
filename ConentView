@@ -1,203 +1,626 @@
 import SwiftUI
 import CoreBluetooth
+import Charts  // For SwiftUI Charts (iOS 16+)
 
-class BluetoothView: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeripheralDelegate {
-    private var centralManager: CBCentralManager?
-    private var peripherals: [CBPeripheral] = []
-    private var selectedPeripheral: CBPeripheral?
+// MARK: - BluetoothView Class
+
+
+
+// MARK: - ContentView Struct
+
+struct ContentView: View {
+    @ObservedObject var bluetooth = BluetoothView()
     
-    @Published var peripheralNames: [String] = []
-    @Published var receivedMessages: [String] = [] // Store received messages
-    @Published var isConnected: Bool = false // Track connection status
-    @Published var connectedPeripheralName: String? = nil // Name of connected peripheral
+    // Local state for connection (mirrors bluetooth.isConnected)
+    @State private var isConnected = true
     
-    private var peripheralMap: [String: CBPeripheral] = [:]
-    private var writableCharacteristic: CBCharacteristic? // Store writable characteristic
-    private var notifyCharacteristic: CBCharacteristic?   // Store notify characteristic (optional)
+    // States for incoming messages (live sensor reading)
+    @State private var lastReceivedMessage: String = "31"
+    @State private var secondToLastMessage: String = "65"
+    @State private var messageUpdateCounter = 0
     
-    override init() {
-        super.init()
-        self.centralManager = CBCentralManager(delegate: self, queue: .main)
+    // UI Mode: Live or History
+    @State private var currentMode: Mode = .live
+    
+    // Hard coded hourly values
+    @State private var leftHandleData: [Int] = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 15, 25, 10, 25, 35, 0, 10, 0, 0, 0, 10, 0, 0, 0, 0, 0
+    ]
+    
+    @State private var rightHandleData: [Int] = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 20, 25, 15, 30, 40, 0, 10, 0, 0, 0, 15, 0, 0, 0, 0, 0
+    ]
+    
+    @State private var leftWeekData: [Int] = [
+        0, 25, 40, 35, 25, 30, 20, 15
+    ]
+    
+    @State private var rightWeekData: [Int] = [
+        0, 25, 35, 30, 25, 30, 15, 10
+    ]
+    
+    @State private var leftMonthData: [Int] = [
+        30, 35, 45, 40, 30, 35, 50, 15, 0, 0, 25, 10, 25, 35, 0, 10, 0, 0, 0, 10, 30, 45, 25, 30, 15, 0, 0, 15, 25, 35, 10
+    ]
+    
+    @State private var rightMonthData: [Int] = [
+        30, 35, 45, 40, 25, 35, 40, 15, 0, 0, 25, 10, 15, 30, 0, 10, 0, 0, 0, 10, 30, 45, 25, 25, 10, 0, 0, 15, 20, 35, 10
+    ]
+    
+    @State private var leftYearData: [Int] = [
+       45, 45, 40, 45, 35, 40, 35, 30, 35, 30, 30, 25
+    ]
+    
+    @State private var rightYearData: [Int] = [
+       0, 45, 40, 35, 45, 35, 35, 30, 30, 35, 30, 25, 25, 0
+    ]
+    
+    
+    // Sample Data Model
+    struct YearWeight: Identifiable {
+        let id = UUID()  // Unique ID for SwiftUI
+        let months: String // e.g., "January", "February", etc.
+        let weight: Double // Example: 70.5 kg or pounds
+    }
+
+    // Sample Data
+    let leftYearData2 = [
+        YearWeight(months: "Jan", weight: 70),
+        YearWeight(months: "Feb", weight: 60),
+        YearWeight(months: "Mar", weight: 60),
+        YearWeight(months: "Apr", weight: 40),
+        YearWeight(months: "May", weight: 50),
+        YearWeight(months: "Jun", weight: 45),
+        YearWeight(months: "Jul", weight: 30),
+        YearWeight(months: "Aug", weight: 35),
+        YearWeight(months: "Sep", weight: 30),
+        YearWeight(months: "Oct", weight: 30),
+        YearWeight(months: "Nov", weight: 25),
+        YearWeight(months: "Dec", weight: 25)
+    ]
+    
+    
+    private func average(of data: [Int]) -> Int {
+        let nonZeroValues = data.filter { $0 > 0 }
+        guard !nonZeroValues.isEmpty else { return 0 }
+        let sum = nonZeroValues.reduce(0, +)
+        return sum / nonZeroValues.count
     }
     
-    // MARK: - CBCentralManagerDelegate Methods
-    
-    func centralManagerDidUpdateState(_ central: CBCentralManager) {
-        switch central.state {
-        case .poweredOn:
-            print("Bluetooth is on")
-            self.centralManager?.scanForPeripherals(withServices: nil,
-                                                    options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
-        case .poweredOff:
-            print("Bluetooth is powered off")
-            resetConnection()
-        case .resetting:
-            print("Bluetooth is resetting")
-            resetConnection()
-        case .unauthorized:
-            print("Bluetooth is unauthorized")
-            resetConnection()
-        case .unsupported:
-            print("Bluetooth is unsupported on this device")
-            resetConnection()
-        case .unknown:
-            print("Bluetooth state is unknown")
-            resetConnection()
-        @unknown default:
-            print("A new state is available that is not handled")
-            resetConnection()
-        }
-    }
-    
-    func centralManager(_ central: CBCentralManager,
-                       didDiscover peripheral: CBPeripheral,
-                       advertisementData: [String : Any],
-                       rssi RSSI: NSNumber) {
-        if let name = peripheral.name, !peripherals.contains(peripheral) {
-            peripherals.append(peripheral)
-            peripheralNames.append(name)
-            peripheralMap[name] = peripheral // Store the mapping
-            print("Discovered peripheral: \(name)")
-        }
-    }
-    
-    func connectToPeripheral(named peripheralName: String) {
-        guard let peripheral = peripheralMap[peripheralName] else {
-            print("Peripheral \(peripheralName) not found")
-            return
-        }
-        print("Connecting to peripheral: \(peripheralName)")
-        selectedPeripheral = peripheral
-        selectedPeripheral?.delegate = self
-        centralManager?.stopScan()
-        centralManager?.connect(peripheral, options: nil)
-    }
-    
-    func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        print("Connected to \(peripheral.name ?? "a peripheral")")
-        DispatchQueue.main.async {
-            self.isConnected = true
-            self.connectedPeripheralName = peripheral.name
-        }
-        peripheral.discoverServices(nil) // Discover services after connecting
-    }
-    
-    func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
-        print("Failed to connect to \(peripheral.name ?? "a peripheral"):", error?.localizedDescription ?? "No error")
-        DispatchQueue.main.async {
-            self.isConnected = false
-            self.connectedPeripheralName = nil
-        }
-    }
-    
-    func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
-        print("Disconnected from \(peripheral.name ?? "a peripheral")")
-        DispatchQueue.main.async {
-            self.isConnected = false
-            self.connectedPeripheralName = nil
-        }
-        // Optionally, restart scanning
-        centralManager?.scanForPeripherals(withServices: nil,
-                                           options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
-    }
-    
-    // MARK: - CBPeripheralDelegate Methods
-    
-    func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
-        if let error = error {
-            print("Error discovering services: \(error.localizedDescription)")
-            return
-        }
-        guard let services = peripheral.services else { return }
-        for service in services {
-            print("Discovered service: \(service.uuid)")
-            peripheral.discoverCharacteristics(nil, for: service)
-        }
-    }
-    
-    func peripheral(_ peripheral: CBPeripheral,
-                    didDiscoverCharacteristicsFor service: CBService,
-                    error: Error?) {
-        if let error = error {
-            print("Error discovering characteristics: \(error.localizedDescription)")
-            return
-        }
-        guard let characteristics = service.characteristics else { return }
-        for characteristic in characteristics {
-            print("Discovered characteristic: \(characteristic.uuid)")
-            // Check for writable characteristic
-            if characteristic.properties.contains(.write) ||
-               characteristic.properties.contains(.writeWithoutResponse) {
-                writableCharacteristic = characteristic
-                sendData("Hello from Mac!") // Example: send data once found
+    var body: some View {
+        NavigationView {
+            if isConnected {
+                // ======================
+                // Connected (Main View)
+                // ======================
+                TabView {
+                    
+                    // LEFT PAGE (placeholder)
+                    VStack {
+                        Spacer()
+                        Image(systemName: "sun.min.fill")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 100, height: 100)
+                            .foregroundColor(.yellow)
+                        Text("Left Page")
+                            .font(.headline)
+                        Spacer()
+                    }
+                    
+                    // MIDDLE PAGE (Handdrawn UI)
+                    connectedContent  // <--- Our updated middle view
+                    
+                    // RIGHT PAGE (placeholder)
+                    VStack {
+                        Spacer()
+                        Image(systemName: "moon.fill")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 100, height: 100)
+                            .foregroundColor(.blue)
+                        Text("Right Page")
+                            .font(.headline)
+                        Spacer()
+                    }
+                    
+                }
+                .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
+                
+            } else {
+                // ======================
+                // Device Selection List
+                // ======================
+                VStack {
+                    List(bluetooth.peripheralNames, id: \.self) { peripheralName in
+                        Button(action: {
+                            bluetooth.connectToPeripheral(named: peripheralName)
+                        }) {
+                            HStack {
+                                Image(systemName: "dot.radiowaves.left.and.right")
+                                    .foregroundColor(.blue)
+                                Text(peripheralName)
+                                    .foregroundColor(.primary)
+                            }
+                        }
+                    }
+                    .listStyle(PlainListStyle())
+                    .navigationTitle("Select a Device")
+                    
+                    Spacer()
+                }
             }
-            // Check for notify characteristic
-            if characteristic.properties.contains(.notify) {
-                notifyCharacteristic = characteristic
-                peripheral.setNotifyValue(true, for: characteristic)
-                print("Subscribed to notifications for characteristic: \(characteristic.uuid)")
+        }
+        // Keep local state synced with the BluetoothView's isConnected
+        .onReceive(bluetooth.$isConnected) { connected in
+            self.isConnected = connected
+        }
+    }
+    
+    // MARK: - Middle Page View
+    // UPDATED: This entire container ensures the Picker is in the same vertical position
+    private var connectedContent: some View {
+        VStack(spacing: 0) {
+            
+            // Title (e.g. “SMART-HANDLE6”)
+            Text(bluetooth.connectedPeripheralName ?? "SMART-HANDLE6")
+                .font(.headline)
+                .padding(.top, 8)
+            
+            // A little spacer after the title
+            Spacer(minLength: 16)
+            
+            // MAIN CONTENT: Either Live or History
+            switch currentMode {
+            case .live:
+                liveModeView
+            case .day:
+                dayModeView
+            case .week:
+                weekModeView
+            case .month:
+                monthModeView
+            case .year:
+                yearModeView
+            }
+            
+            // Spacer to push the picker and toolbar ~¼ from the bottom
+            Spacer()
+            
+            // Picker for Live vs. History
+            Picker("", selection: $currentMode) {
+                Text("Live").tag(Mode.live)
+                Text("Day").tag(Mode.day)
+                Text("Week").tag(Mode.week)
+                Text("Month").tag(Mode.month)
+                Text("Year").tag(Mode.year)
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
+            .padding(.bottom, 16)
+            
+            // Bottom toolbar
+            bottomToolbar
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Update sensor readings on new messages
+        .onReceive(bluetooth.$receivedMessages) { messages in
+            messageUpdateCounter += 1
+            // Only update display on every odd message
+            if messageUpdateCounter % 2 == 1 {
+                if let lastMessage = messages.last {
+                    self.lastReceivedMessage = lastMessage
+                    if messages.count >= 2 {
+                        self.secondToLastMessage = messages[messages.count - 2]
+                    } else {
+                        self.secondToLastMessage = ""
+                    }
+                }
             }
         }
     }
     
-    func peripheral(_ peripheral: CBPeripheral,
-                    didUpdateValueFor characteristic: CBCharacteristic,
-                    error: Error?) {
-        if let error = error {
-            print("Error updating value for characteristic \(characteristic.uuid): \(error.localizedDescription)")
-            return
+    // MARK: - Live Mode
+    // UPDATED: Removed extra vertical padding so it aligns with the new layout
+    private var liveModeView: some View {
+        HStack(spacing: 40) {
+            Spacer()
+            // Left handle gauge
+            CircularGauge(value: parseReading(lastReceivedMessage),
+                          label: "Left Handle")
+            // Right handle gauge
+            CircularGauge(value: parseReading(secondToLastMessage),
+                          label: "Right Handle")
+            Spacer()
         }
-        
-        guard let data = characteristic.value else {
-            print("No data received for characteristic \(characteristic.uuid)")
-            return
-        }
-        
-        if let message = String(data: data, encoding: .utf8) {
-            DispatchQueue.main.async {
-                self.receivedMessages.append(message)
-                print("Received data: \(message)")
+    }
+    
+    // MARK: - DAY History Mode
+    
+    private var dayModeView: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                
+                Text("Left Average Weight: \(average(of: leftHandleData)) lbs")
+                    .font(.body)
+                    .padding(.leading)
+                
+                Chart(leftHandleData.indices, id: \.self) { index in
+                    BarMark(
+                        x: .value("Time", index),
+                        y: .value("Weight", leftHandleData[index])
+                    )
+                }
+                .frame(height: 200)
+                .padding(.horizontal)
+                .chartXAxis {
+                    AxisMarks(values: [0, 6, 12, 18]) { value in
+                        if let index = value.as(Int.self) {
+                            AxisValueLabel {
+                                switch index {
+                                case 0:
+                                    Text("12am")
+                                case 6:
+                                    Text("6am")
+                                case 12:
+                                    Text("12pm")
+                                case 18:
+                                    Text("6pm")
+                                default:
+                                    EmptyView()
+                                }
+                            }
+                        }
+                    }
+                }
+                .chartYAxisLabel("lbs")
+                
+                Text("Right Average Weight: \(average(of: rightHandleData)) lbs")
+                    .font(.body)
+                    .padding(.leading)
+                
+                Chart(rightHandleData.indices, id: \.self) { index in
+                    BarMark(
+                        x: .value("Time", index),
+                        y: .value("Weight", rightHandleData[index])
+                    )
+                }
+                .frame(height: 200)
+                .padding(.horizontal)
+                .chartXAxis {
+                    AxisMarks(values: [0, 6, 12, 18]) { value in
+                        if let index = value.as(Int.self) {
+                            AxisValueLabel {
+                                switch index {
+                                case 0:
+                                    Text("12am")
+                                case 6:
+                                    Text("6am")
+                                case 12:
+                                    Text("12pm")
+                                case 18:
+                                    Text("6pm")
+                                default:
+                                    EmptyView()
+                                }
+                            }
+                        }
+                    }
+                }
+                .chartYAxisLabel("lbs")
             }
-        } else {
-            print("Unable to decode received data.")
         }
     }
     
-    func peripheral(_ peripheral: CBPeripheral,
-                    didWriteValueFor characteristic: CBCharacteristic,
-                    error: Error?) {
-        if let error = error {
-            print("Error writing value to characteristic \(characteristic.uuid): \(error.localizedDescription)")
-            return
+    // MARK: - WEEK History Mode
+    
+    private var weekModeView: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                
+                Text("Left Average: \(average(of: leftWeekData)) lbs")
+                    .font(.body)
+                    .padding(.leading)
+                
+                Chart(SampleLeftWeekData) { day in //leftYearData2
+                    BarMark(
+                        x: .value("Time", day.time),
+                        y: .value("Weight", day.weight)
+                    )
+                }
+                .frame(height: 250)
+                .padding(.horizontal)
+                .chartXAxis {
+                    AxisMarks { value in
+                        AxisValueLabel()
+                    }
+                }
+                .chartYAxis {
+                    AxisMarks { value in
+                        AxisGridLine() // Keeps horizontal grid lines
+                            AxisTick() // Keeps small tick marks
+                                AxisValueLabel()
+                                    .font(.title2) // Increases Y-axis font size
+                        }
+                }
+                .chartYAxisLabel("lbs ", position: .top, alignment: .topTrailing)
+                
+                Text("Right Average: \(average(of: rightHandleData)) lbs")
+                    .font(.body)
+                    .padding(.leading)
+                
+                Chart(SampleRightWeekData) { day in //leftYearData2
+                    BarMark(
+                        x: .value("Time", day.time),
+                        y: .value("Weight", day.weight)
+                    )
+                }
+                .frame(height: 250)
+                .padding(.horizontal)
+                .chartXAxis {
+                    AxisMarks { value in
+                        AxisValueLabel()
+                    }
+                }
+                .chartYAxis {
+                    AxisMarks { value in
+                        AxisGridLine() // Keeps horizontal grid lines
+                            AxisTick() // Keeps small tick marks
+                                AxisValueLabel()
+                                    .font(.title2) // Increases Y-axis font size
+                        }
+                }
+                .chartYAxisLabel("lbs ", position: .top, alignment: .topTrailing)
+            }
         }
-        print("Successfully wrote value to characteristic \(characteristic.uuid)")
     }
     
-    // MARK: - Sending Data
+    // MARK: - MONTH History Mode
     
-    func sendData(_ message: String) {
-        guard let selectedPeripheral = selectedPeripheral,
-              let writableCharacteristic = writableCharacteristic else {
-            print("No connected peripheral or writable characteristic available.")
-            return
+    private var monthModeView: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                
+                Text("Left Average: \(average(of: leftMonthData)) lbs")
+                    .font(.body)
+                    .padding(.leading)
+                
+                Chart(leftMonthData.indices, id: \.self) { index in
+                    BarMark(
+                        x: .value("Time", index),
+                        y: .value("Weight", leftMonthData[index])
+                    )
+                }
+                .frame(height: 200)
+                .padding(.horizontal)
+                .chartXAxis {
+                    AxisMarks(values: [4, 9, 14, 19, 24, 29]) { value in
+                        if let index = value.as(Int.self) {
+                            AxisValueLabel {
+                                switch index {
+                                case 4:
+                                    Text("5")
+                                case 9:
+                                    Text("10")
+                                case 14:
+                                    Text("15")
+                                case 19:
+                                    Text("20")
+                                case 24:
+                                    Text("25")
+                                case 29:
+                                    Text("30")
+                                default:
+                                    EmptyView()
+                                }
+                            }
+                            .offset(x: -8)
+                        }
+                    }
+                }
+                .chartYAxisLabel("lbs")
+                
+                Text("Right Average: \(average(of: rightMonthData)) lbs")
+                    .font(.body)
+                    .padding(.leading)
+                
+                Chart(rightMonthData.indices, id: \.self) { index in
+                    BarMark(
+                        x: .value("Time", index),
+                        y: .value("Weight", rightMonthData[index])
+                    )
+                }
+                .frame(height: 200)
+                .padding(.horizontal)
+                .chartXAxis {
+                    AxisMarks(values: [4, 9, 14, 19, 24, 29]) { value in
+                        if let index = value.as(Int.self) {
+                            AxisValueLabel {
+                                switch index {
+                                case 4:
+                                    Text("5")
+                                case 9:
+                                    Text("10")
+                                case 14:
+                                    Text("15")
+                                case 19:
+                                    Text("20")
+                                case 24:
+                                    Text("25")
+                                case 29:
+                                    Text("30")
+                                default:
+                                    EmptyView()
+                                }
+                            }
+                            .offset(x: -8)
+                        }
+                    }
+                }
+                .chartYAxisLabel("lbs")
+            }
         }
-        if let data = message.data(using: .utf8) {
-            selectedPeripheral.writeValue(data,
-                                          for: writableCharacteristic,
-                                          type: .withResponse)
-            print("Sent data: \(message)")
+    }
+    
+    // MARK: - YEAR History Mode
+    
+    private var yearModeView: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                
+                Text("Left Average Weight: \(average(of: leftYearData)) lbs")
+                    .font(.body)
+                    .padding(.leading)
+                
+                Chart(SampleLeftYearData) { month in //leftYearData2
+                    BarMark(
+                        x: .value("Time", month.time),
+                        y: .value("Weight", month.weight)
+                    )
+                }
+                .frame(height: 250)
+                .padding(.horizontal)
+                .chartXAxis {
+                    AxisMarks { value in
+                        AxisValueLabel()
+                    }
+                }
+                .chartYAxis {
+                    AxisMarks { value in
+                        AxisGridLine() // Keeps horizontal grid lines
+                            AxisTick() // Keeps small tick marks
+                                AxisValueLabel()
+                                    .font(.title2) // Increases Y-axis font size
+                        }
+                }
+                .chartYAxisLabel("lbs ", position: .top, alignment: .topTrailing)
+                
+                Text("Right Average Weight: \(average(of: rightYearData)) lbs")
+                    .font(.body)
+                    .padding(.leading)
+                
+                Chart(SampleRightYearData) { month in //leftYearData2
+                    BarMark(
+                        x: .value("Time", month.time),
+                        y: .value("Weight", month.weight)
+                    )
+                }
+                .frame(height: 250)
+                .padding(.horizontal)
+                .chartXAxis {
+                    AxisMarks { value in
+                        AxisValueLabel()
+                    }
+                }
+                .chartYAxis {
+                    AxisMarks { value in
+                        AxisGridLine() // Keeps horizontal grid lines
+                            AxisTick() // Keeps small tick marks
+                                AxisValueLabel()
+                                    .font(.title2) // Increases Y-axis font size
+                        }
+                }
+                .chartYAxisLabel("lbs ", position: .top, alignment: .topTrailing)
+            }
         }
+    }
+    
+    // MARK: - Bottom Toolbar (Haptics, Connection, Settings)
+    private var bottomToolbar: some View {
+        HStack {
+            
+            Spacer()
+            
+            Button {
+                // Haptics logic
+            } label: {
+                Image(systemName: "waveform")
+                    .font(.title2)
+            }
+            
+            Spacer()
+            
+            Button {
+                // Some Bluetooth or handle logic
+            } label: {
+                Image(systemName: "dot.radiowaves.left.and.right")
+                    .font(.title2)
+            }
+            
+            Spacer()
+            
+            Button {
+                // Open Settings
+            } label: {
+                Image(systemName: "gearshape.fill")
+                    .font(.title2)
+            }
+            Spacer()
+        }
+        .padding()
     }
     
     // MARK: - Helper Methods
     
-    private func resetConnection() {
-        peripherals.removeAll()
-        peripheralNames.removeAll()
-        peripheralMap.removeAll()
-        selectedPeripheral = nil
-        isConnected = false
-        connectedPeripheralName = nil
-        receivedMessages.removeAll()
+    /// Attempt to parse the reading as a Double, clamping to [0..100]
+    private func parseReading(_ str: String) -> Double {
+        if let val = Double(str) {
+            return min(max(val, 0), 100)
+        }
+        return 0
     }
+    
+}
+
+// MARK: - Mode Enum
+
+enum Mode {
+    case live
+    case day
+    case week
+    case month
+    case year
+}
+
+// MARK: - CircularGauge View
+
+struct CircularGauge: View {
+    let value: Double  // 0..100 or your desired max
+    let label: String
+    
+    var body: some View {
+        VStack(spacing: 8) {
+            ZStack {
+                // Background circle
+                Circle()
+                    .trim(from: 0, to: 0.75)
+                    .stroke(.gray.opacity(0.2), style: StrokeStyle(lineWidth: 16, lineCap: .round))
+                    .rotationEffect(.degrees(135))
+                    .frame(width: 150, height: 150)
+                
+                // Filled arc
+                Circle()
+                    .trim(from: 0, to: (CGFloat(value / 100) * 0.75))
+                    .stroke(Color.blue, style: StrokeStyle(lineWidth: 16, lineCap: .round))
+                    .rotationEffect(.degrees(135))
+                    .frame(width: 150, height: 150)
+                
+                // Value text
+                Text("\(Int(value)) lbs")
+                    .font(.system(size: 40))
+                    .bold()
+            }
+            
+            // Label under the gauge
+            Text(label)
+                .font(.footnote)
+                .bold()
+        }
+    }
+}
+
+// MARK: - Preview
+
+#Preview {
+    ContentView()
 }
