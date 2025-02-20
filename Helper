@@ -1,0 +1,22 @@
+import SwiftUI
+
+struct PercentageSpacer: View {
+    // The fraction of the total available space to use (e.g., 0.1 for 10%)
+    let percentage: CGFloat
+    // The axis along which to apply the spacer (default is vertical)
+    let axis: Axis.Set
+
+    var body: some View {
+        GeometryReader { geometry in
+            if axis == .vertical {
+                Color.clear
+                    .frame(height: geometry.size.height * percentage)
+            } else {
+                Color.clear
+                    .frame(width: geometry.size.width * percentage)
+            }
+        }
+        // Fix the GeometryReader's size to avoid layout issues
+        .fixedSize()
+    }
+}
