@@ -1,0 +1,136 @@
+import SwiftUI
+
+struct HapticSettingsView: View {
+    @State private var brightness: CGFloat = 0.5
+    @State private var volume: CGFloat = 0.5
+
+    var body: some View {
+        GeometryReader { geometry in
+            
+            VStack() {
+                
+                Text("Haptic Settings")
+                    .font(.headline)
+                    .padding(.top, 8)
+                
+                Spacer(minLength: 400)
+                    //.frame(height: geometry.size.height * 0.25)
+                
+                HStack(spacing: 30) {
+                    // Brightness Slider
+                    CustomSlider(value: $brightness, icon: "music.note.list", color: Color.blue)
+                    
+                    // Volume Slider
+                    CustomSlider(value: $volume, icon: "phone.down.waves.left.and.right", color: Color.blue) // water.waves water.waves.slash
+                }
+                .padding()
+                
+                Spacer(minLength: 24)
+                
+                //bottomToolbar
+            }
+            .frame(width: geometry.size.width, height: geometry.size.height)
+        }
+    }
+}
+
+// Custom Pill-Shaped Slider
+struct CustomSlider: View {
+    @Binding var value: CGFloat
+    let icon: String
+    let color: Color
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            RoundedRectangle(cornerRadius: 28)
+                .fill(Color.gray.opacity(0.5))
+                .frame(width: 80, height: 200)
+            
+            RoundedRectangle(cornerRadius: 28)
+                .fill(Color.white.opacity(0.9))
+                .frame(width: 80, height: 200 * value)
+            
+            Image(systemName: icon)
+                .foregroundColor(color)
+                .font(.system(size: 24))
+                .padding(.bottom, 12)
+        }
+        .frame(width: 80, height: 200)
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { gesture in
+                    let newValue = max(0.25, min(1, 1 - (gesture.location.y / 200)))
+                    value = newValue
+                }
+        )
+    }
+}
+
+private var bottomToolbar: some View {
+    HStack {
+        
+        Spacer()
+        Spacer()
+        
+        Button {
+            // Haptics logic
+        } label: {
+            Image(systemName: "gauge.with.needle")
+                .font(.title)
+                .foregroundColor(.gray)
+        }
+        
+        Spacer()
+        
+        Button {
+            // Some Bluetooth or handle logic
+        } label: {
+            Image(systemName: "sun.max.circle")
+                .font(.title)
+                .foregroundColor(.gray)
+        }
+        
+        Spacer()
+        
+        Button {
+        } label: {
+            Image(systemName: "circle.hexagongrid.circle")
+                .font(.title)
+                .foregroundColor(.gray)
+        }
+        Spacer()
+        
+        Button {
+        } label: {
+            Image(systemName: "calendar.circle")
+                .font(.title)
+                .foregroundColor(.gray)
+        }
+        Spacer()
+        
+        Button {
+        } label: {
+            Image(systemName: "folder.circle")
+                .font(.title)
+                .foregroundColor(.gray)
+        }
+        Spacer()
+        
+        Button {
+        } label: {
+            Image(systemName: "gearshape.circle.fill")
+                .font(.title)
+                .foregroundColor(.blue)
+        }
+        Spacer()
+        Spacer()
+    }
+    .padding()
+}
+
+
+struct HapticSettingsView_Previews: PreviewProvider {
+    static var previews: some View {
+        HapticSettingsView()
+    }
+}
