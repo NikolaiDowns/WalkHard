@@ -8,6 +8,20 @@ struct Entry: Identifiable {
     let weight: Double // Pounds (TODO: add kg option)
 }
 
+func updateSampleLeftYearData(with newWeights: [Int]) -> [Entry] {
+    // Ensure exactly 12 integers are provided.
+    guard newWeights.count == 12 else {
+        fatalError("Expected exactly 12 weight values, one for each month.")
+    }
+    
+    // Create new entries by combining the current month labels with the new weights.
+    let updatedData = SampleLeftYearData.enumerated().map { (index, entry) in
+        Entry(time: entry.time, weight: Double(newWeights[index]))
+    }
+    
+    return updatedData
+}
+
 /* SAMPLE DATA
     Originally used for testing, but if the app is downloaded before purchase
     why not show customers what it will look like*/
@@ -131,4 +145,58 @@ let SampleRightWeekData = [
     Entry(time: "Thu", weight: 35),
     Entry(time: "Fri", weight: 20),
     Entry(time: "Sat", weight: 15)
+]
+
+let SampleLeftDayData = [
+    Entry(time: "12am", weight: 0),
+    Entry(time: "1am", weight: 0),
+    Entry(time: "2am", weight: 0),
+    Entry(time: "3am", weight: 0),
+    Entry(time: "4am", weight: 0),
+    Entry(time: "5am", weight: 0),
+    Entry(time: "6am", weight: 0),
+    Entry(time: "7am", weight: 20),
+    Entry(time: "8am", weight: 30),
+    Entry(time: "9am", weight: 10),
+    Entry(time: "10am", weight: 35),
+    Entry(time: "11am", weight: 45),
+    Entry(time: "12pm", weight: 10),
+    Entry(time: "1pm", weight: 0),
+    Entry(time: "2pm", weight: 0),
+    Entry(time: "3pm", weight: 10),
+    Entry(time: "4pm", weight: 15),
+    Entry(time: "5pm", weight: 5),
+    Entry(time: "6pm", weight: 0),
+    Entry(time: "7pm", weight: 0),
+    Entry(time: "8pm", weight: 0),
+    Entry(time: "9pm", weight: 0),
+    Entry(time: "10pm", weight: 0),
+    Entry(time: "11pm", weight: 0)
+]
+
+let SampleRightDayData = [
+    Entry(time: "12am", weight: 0),
+    Entry(time: "1am", weight: 0),
+    Entry(time: "2am", weight: 0),
+    Entry(time: "3am", weight: 0),
+    Entry(time: "4am", weight: 0),
+    Entry(time: "5am", weight: 0),
+    Entry(time: "6am", weight: 0),
+    Entry(time: "7am", weight: 20),
+    Entry(time: "8am", weight: 30),
+    Entry(time: "9am", weight: 10),
+    Entry(time: "10am", weight: 35),
+    Entry(time: "11am", weight: 45),
+    Entry(time: "12pm", weight: 10),
+    Entry(time: "1pm", weight: 0),
+    Entry(time: "2pm", weight: 0),
+    Entry(time: "3pm", weight: 10),
+    Entry(time: "4pm", weight: 15),
+    Entry(time: "5pm", weight: 5),
+    Entry(time: "6pm", weight: 0),
+    Entry(time: "7pm", weight: 0),
+    Entry(time: "8pm", weight: 0),
+    Entry(time: "9pm", weight: 0),
+    Entry(time: "10pm", weight: 0),
+    Entry(time: "11pm", weight: 0)
 ]
