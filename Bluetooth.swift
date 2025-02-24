@@ -22,12 +22,14 @@ class BluetoothView: NSObject, ObservableObject, CBCentralManagerDelegate, CBPer
     
     // MARK: - CBCentralManagerDelegate Methods
     
+    
+    
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
         switch central.state {
         case .poweredOn:
             print("Bluetooth is on")
             self.centralManager?.scanForPeripherals(withServices: nil,
-                                                    options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
+                                                    options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]) // FALSE
         case .poweredOff:
             print("Bluetooth is powered off")
             resetConnection()
@@ -49,17 +51,40 @@ class BluetoothView: NSObject, ObservableObject, CBCentralManagerDelegate, CBPer
         }
     }
     
+//    func centralManager(_ central: CBCentralManager,
+//                        didDiscover peripheral: CBPeripheral,
+//                        advertisementData: [String : Any],
+//                        rssi RSSI: NSNumber) {
+//        // Use peripheral.name or, if nil, try the advertisement data key.
+//        let deviceName = peripheral.name ?? (advertisementData[CBAdvertisementDataLocalNameKey] as? String) ?? "Unknown Device"
+//        
+//        if !peripherals.contains(peripheral) {
+//            peripherals.append(peripheral)
+//            peripheralNames.append(deviceName)
+//            peripheralMap[deviceName] = peripheral // Store the mapping
+//            print("Discovered peripheral: \(deviceName)")
+//        }
+//    }
+    
     func centralManager(_ central: CBCentralManager,
-                       didDiscover peripheral: CBPeripheral,
-                       advertisementData: [String : Any],
-                       rssi RSSI: NSNumber) {
-        if let name = peripheral.name, !peripherals.contains(peripheral) {
+                        didDiscover peripheral: CBPeripheral,
+                        advertisementData: [String : Any],
+                        rssi RSSI: NSNumber) {
+        // Use peripheral.name or, if nil, try the advertisement data key.
+        let deviceName = peripheral.name ?? (advertisementData[CBAdvertisementDataLocalNameKey] as? String) ?? "Unknown Device"
+        
+        // Skip processing if the device name is "Unknown Device"
+        guard deviceName != "Unknown Device" else { return }
+        
+        if !peripherals.contains(peripheral) {
             peripherals.append(peripheral)
-            peripheralNames.append(name)
-            peripheralMap[name] = peripheral // Store the mapping
-            print("Discovered peripheral: \(name)")
+            peripheralNames.append(deviceName)
+            peripheralMap[deviceName] = peripheral // Store the mapping
+            print("Discovered peripheral: \(deviceName)")
         }
     }
+
+
     
     func connectToPeripheral(named peripheralName: String) {
         guard let peripheral = peripheralMap[peripheralName] else {
@@ -98,7 +123,7 @@ class BluetoothView: NSObject, ObservableObject, CBCentralManagerDelegate, CBPer
         }
         // Optionally, restart scanning
         centralManager?.scanForPeripherals(withServices: nil,
-                                           options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
+                                           options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]) // FALSE
     }
     
     // MARK: - CBPeripheralDelegate Methods
@@ -140,6 +165,29 @@ class BluetoothView: NSObject, ObservableObject, CBCentralManagerDelegate, CBPer
         }
     }
     
+//    func peripheral(_ peripheral: CBPeripheral,
+//                    didUpdateValueFor characteristic: CBCharacteristic,
+//                    error: Error?) {
+//        if let error = error {
+//            print("Error updating value for characteristic \(characteristic.uuid): \(error.localizedDescription)")
+//            return
+//        }
+//        
+//        guard let data = characteristic.value else {
+//            print("No data received for characteristic \(characteristic.uuid)")
+//            return
+//        }
+//        
+//        if let message = String(data: data, encoding: .utf8) {
+//            DispatchQueue.main.async {
+//                self.receivedMessages.append(message)
+//                print("Received data: \(message)")
+//            }
+//        } else {
+//            print("Unable to decode received data.")
+//        }
+//    }
+    
     func peripheral(_ peripheral: CBPeripheral,
                     didUpdateValueFor characteristic: CBCharacteristic,
                     error: Error?) {
@@ -153,15 +201,64 @@ class BluetoothView: NSObject, ObservableObject, CBCentralManagerDelegate, CBPer
             return
         }
         
-        if let message = String(data: data, encoding: .utf8) {
-            DispatchQueue.main.async {
-                self.receivedMessages.append(message)
-                print("Received data: \(message)")
-            }
-        } else {
-            print("Unable to decode received data.")
+        var intValue: Int = 0
+        
+        // Check the data length and load the correct integer type
+        switch data.count {
+        case MemoryLayout<UInt8>.size:
+            intValue = Int(data.withUnsafeBytes { $0.load(as: UInt8.self) })
+        case MemoryLayout<UInt16>.size:
+            intValue = Int(data.withUnsafeBytes { $0.load(as: UInt16.self) })
+        case MemoryLayout<UInt32>.size:
+            intValue = Int(data.withUnsafeBytes { $0.load(as: UInt32.self) })
+        default:
+            print("Unexpected data length: \(data.count)")
+            return
+        }
+        
+        // Convert the integer to a string for display
+        let message = String(intValue)
+        
+        DispatchQueue.main.async {
+            self.receivedMessages.append(message)
+            print("Received data: \(message)")
         }
     }
+    
+//    func peripheral(_ peripheral: CBPeripheral,
+//                    didUpdateValueFor characteristic: CBCharacteristic,
+//                    error: Error?) {
+//        if let error = error {
+//            print("Error updating value for characteristic \(characteristic.uuid): \(error.localizedDescription)")
+//            return
+//        }
+//
+//        guard let data = characteristic.value else {
+//            print("No data received for characteristic \(characteristic.uuid)")
+//            return
+//        }
+//
+//        // ✅ Identify which characteristic is updating
+//        if characteristic.uuid == CBUUID(string: "FFE1") {  // Left weight characteristic
+//            if data.count == 2 {
+//                let leftWeight = Int(data[0]) | (Int(data[1]) << 8)
+//                DispatchQueue.main.async {
+//                    self.receivedMessages.append("Left Weight: \(leftWeight)")
+//                    print("Received Left Weight: \(leftWeight)")
+//                }
+//            }
+//        } else if characteristic.uuid == CBUUID(string: "FFE2") {  // Right weight characteristic
+//            if data.count == 2 {
+//                let rightWeight = Int(data[0]) | (Int(data[1]) << 8)
+//                DispatchQueue.main.async {
+//                    self.receivedMessages.append("Right Weight: \(rightWeight)")
+//                    print("Received Right Weight: \(rightWeight)")
+//                }
+//            }
+//        } else {
+//            print("Unknown characteristic: \(characteristic.uuid)")
+//        }
+//    }
     
     func peripheral(_ peripheral: CBPeripheral,
                     didWriteValueFor characteristic: CBCharacteristic,
